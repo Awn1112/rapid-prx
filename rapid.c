@@ -201,7 +201,7 @@ static void process(OrbisPadData *d)
     menu_input();
 
     if (g_on && !g_open && (d->buttons & PAD_R2)) {
-        uint64_t t = sceKernelGetProcessTimeLow() / 1000ULL;
+        uint64_t t = sceKernelGetProcessTime() / 1000ULL;
         if ((t / (uint64_t)g_ms) & 1ULL) d->buttons &= ~PAD_R2;
     }
 }
