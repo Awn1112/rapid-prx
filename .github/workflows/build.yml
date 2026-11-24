@@ -13,9 +13,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld unzip
           mkdir -p $HOME/ps4toolchain tc
-          gh release download --repo OpenOrbis/OpenOrbis-PS4-Toolchain --dir tc
-          ls -la tc
           cd tc
+          curl -sL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/latest | jq -r '.assets[].browser_download_url' > urls.txt
+          cat urls.txt
+          while read u; do curl -sLO "$u"; done < urls.txt
+          ls -la
           for f in *.tar.gz; do [ -e "$f" ] && tar xzf "$f" -C $HOME/ps4toolchain; done
           for f in *.zip; do [ -e "$f" ] && unzip -q "$f" -d $HOME/ps4toolchain; done
           LINUXBIN=$(find $HOME/ps4toolchain -type d -path '*bin/linux' | head -1)
