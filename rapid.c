@@ -9,7 +9,6 @@
 #include <orbis/libkernel.h>
 #include <orbis/VideoOut.h>
 #include <orbis/Pad.h>
-#include <orbis/Sysmodule.h>
 
 #define LOG(...) sceKernelDebugOutText(0, __VA_ARGS__)
 
@@ -27,7 +26,6 @@
 #define COMBO   (PAD_RIGHT | PAD_SQUARE)
 #define CFG     "/data/rapid_prx.cfg"
 
-/* ---------------------------- state ---------------------------- */
 static int      g_on;
 static int      g_ms = 40;
 static int      g_open;
@@ -35,28 +33,28 @@ static int      g_sel;
 static int      g_pad = -1;
 static uint32_t g_btn, g_btn_prev;
 
-/* ---------------------------- video ---------------------------- */
 typedef struct {
     int vo, start, count, active;
     void *buf[8];
+    void *cur;
     uint32_t w, h, pitch;
 } Vo;
 
 static Vo g_vo;
-static int (*o_reg)(int, int, void**, int, SceVideoOutBufferAttribute*);
-static int (*o_flip)(int, int, int, int);
-static int (*o_pad)(int, ScePadData*, int);
+static int (*o_reg)(int, int, void * const*, int, const OrbisVideoOutBufferAttribute*);
+static int (*o_flip)(int, int, uint32_t, int64_t);
+static int (*o_pad)(int, OrbisPadData*, int);
+static int (*o_padstate)(int, OrbisPadData*);
 
-/* --------------------------- renderer -------------------------- */
 static inline void px(int x, int y, uint32_t c, uint8_t a)
 {
     uint32_t *fb, d;
     int r, g, b;
 
-    if (!g_vo.active || !g_vo.buf[0]) return;
+    if (!g_vo.active || !g_vo.cur) return;
     if (x < 0 || y < 0 || x >= (int)g_vo.w || y >= (int)g_vo.h) return;
 
-    fb = (uint32_t*)g_vo.buf[0] + y * g_vo.pitch + x;
+    fb = (uint32_t*)g_vo.cur + y * g_vo.pitch + x;
     d = *fb;
     r = (((c >> 16) & 0xFF) * a + ((d >> 16) & 0xFF) * (255 - a)) / 255;
     g = (((c >>  8) & 0xFF) * a + ((d >>  8) & 0xFF) * (255 - a)) / 255;
@@ -123,7 +121,6 @@ static void textf(int x, int y, uint32_t c, const char *f, ...)
     text(x, y, c, b);
 }
 
-/* ---------------------------- menu ----------------------------- */
 static void menu_draw(void)
 {
     if (!g_open) return;
@@ -144,7 +141,6 @@ static void menu_draw(void)
     text(254, 218, 0x6FA8BC, "X TOGGLE  L/R ADJUST  O CLOSE");
 }
 
-/* ---------------------------- input ---------------------------- */
 static void menu_input(void)
 {
     uint32_t pr = g_btn & ~g_btn_prev;
@@ -159,7 +155,7 @@ static void menu_input(void)
     if (pr & PAD_DOWN) g_sel = (g_sel + 1) % 2;
     if (pr & PAD_CIRCLE) g_open = 0;
 
-    if (pr & PAD_CROSS && g_sel == 0) g_on = !g_on;
+    if ((pr & PAD_CROSS) && g_sel == 0) g_on = !g_on;
 
     if (g_sel == 1) {
         if (g_btn & PAD_LEFT)  { g_ms -= 2; if (g_ms < 10)  g_ms = 10; }
@@ -167,23 +163,26 @@ static void menu_input(void)
     }
 }
 
-/* ---------------------------- hooks ---------------------------- */
-static int h_reg(int vo, int start, void **bufs, int n, SceVideoOutBufferAttribute *a)
+static int h_reg(int vo, int start, void * const *bufs, int n,
+                 const OrbisVideoOutBufferAttribute *a)
 {
     int r = o_reg(vo, start, bufs, n, a);
+
     if (r == 0 && a) {
         g_vo.vo = vo; g_vo.start = start; g_vo.count = n;
-        g_vo.w = a->width; g_vo.h = a->height; g_vo.pitch = a->pitchInPixel;
+        g_vo.w = a->width; g_vo.h = a->height;
+        g_vo.pitch = a->pixelPitch ? a->pixelPitch : a->width;
         for (int i = 0; i < n && i < 8; i++) g_vo.buf[i] = bufs[i];
         g_vo.active = 1;
     }
     return r;
 }
 
-static int h_flip(int vo, int port, int frame, int mode)
+static int h_flip(int vo, int port, uint32_t frame, int64_t arg)
 {
-    if (g_vo.active && frame >= 0 && frame < 8) {
-        g_vo.buf[0] = g_vo.buf[frame];
+    if (g_vo.active && frame < 8 && g_vo.buf[frame]) {
+        g_vo.cur = g_vo.buf[frame];
+
         if (g_open) {
             rect(0, 0, g_vo.w, g_vo.h, 0x000000, 70);
             menu_draw();
@@ -191,32 +190,39 @@ static int h_flip(int vo, int port, int frame, int mode)
             textf(10, 10, 0x30C8FF, "RAPID %dMS", g_ms);
         }
     }
-    return o_flip(vo, port, frame, mode);
+    return o_flip(vo, port, frame, arg);
 }
 
-static int h_pad(int h, ScePadData *d, int n)
+static void process(OrbisPadData *d)
+{
+    g_btn_prev = g_btn;
+    g_btn = d->buttons;
+
+    menu_input();
+
+    if (g_on && !g_open && (d->buttons & PAD_R2)) {
+        uint64_t t = sceKernelGetProcessTimeLow() / 1000ULL;
+        if ((t / (uint64_t)g_ms) & 1ULL) d->buttons &= ~PAD_R2;
+    }
+}
+
+static int h_pad(int h, OrbisPadData *d, int n)
 {
     int r = o_pad(h, d, n);
-
-    if (r > 0 && d && h == g_pad) {
-        g_btn_prev = g_btn;
-        g_btn = d->buttons;
-
-        menu_input();
-
-        /* pulse R2: alternate ms on / ms off while user holds the trigger */
-        if (g_on && !g_open && (d->buttons & PAD_R2)) {
-            uint64_t t = sceKernelGetProcessTimeLow() / 1000ULL;
-            if ((t / (uint64_t)g_ms) & 1ULL) d->buttons &= ~PAD_R2;
-        }
-    }
+    if (r > 0 && d && h == g_pad) process(d);
     return r;
 }
 
-/* --------------------------- lifecycle ------------------------- */
+static int h_padstate(int h, OrbisPadData *d)
+{
+    int r = o_padstate(h, d);
+    if (r == 0 && d && h == g_pad) process(d);
+    return r;
+}
+
 static void *stub(void *fn)
 {
-    static uint8_t pool[512];
+    static uint8_t pool[1024];
     static int u;
     uint8_t *p = pool + u;
     u += 16;
@@ -237,7 +243,6 @@ static void patch(void **slot, void *target, void *repl)
     *(uintptr_t*)(p + 2) = (uintptr_t)stub(repl);
     p[10] = 0xFF; p[11] = 0xE0;
     memset(p + 12, 0x90, 2);
-    sceKernelIcacheInvalidateAll();
 }
 
 static void cfg_load(void)
@@ -261,17 +266,15 @@ static void cfg_save(void)
 int module_start(size_t argc, const void *argv)
 {
     LOG("rapid.prx start");
-    sceSysmoduleLoadModule(ORBIS_SYSMODULE_PAD);
-    sceSysmoduleLoadModule(ORBIS_SYSMODULE_VIDEO_OUT);
-    sceSysmoduleLoadModule(ORBIS_SYSMODULE_SYSUTIL);
-
     cfg_load();
+
     g_pad = scePadGetHandle(0x1000000, 0, 0);
     if (g_pad < 0) LOG("no pad %d", g_pad);
 
-    patch((void**)&o_reg,  (void*)sceVideoOutRegisterBuffers, (void*)h_reg);
-    patch((void**)&o_flip, (void*)sceVideoOutSubmitFlip,     (void*)h_flip);
-    patch((void**)&o_pad,  (void*)scePadRead,                (void*)h_pad);
+    patch((void**)&o_reg,      (void*)sceVideoOutRegisterBuffers, (void*)h_reg);
+    patch((void**)&o_flip,     (void*)sceVideoOutSubmitFlip,      (void*)h_flip);
+    patch((void**)&o_pad,      (void*)scePadRead,                 (void*)h_pad);
+    patch((void**)&o_padstate, (void*)scePadReadState,            (void*)h_padstate);
     return 0;
 }
 
