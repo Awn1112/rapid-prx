@@ -1,6 +1,6 @@
 TARGET  := rapid
 CFLAGS  := -O2 -Wall -fPIC -std=gnu11 -I$(OO_PS4_TOOLCHAIN)/include
-LDFLAGS := -L$(OO_PS4_TOOLCHAIN)/lib -lSceVideoOut -lScePad -lSceSysmodule -lkernel
+LDFLAGS := -L$(OO_PS4_TOOLCHAIN)/lib -lSceVideoOut -lScePad -lkernel
 
 $(TARGET).prx: $(TARGET).o
 	$(CC) $(TARGET).o $(LDFLAGS) -nostdlib -Wl,--entry=module_start -Wl,-soname=$(TARGET).prx -o $(TARGET).elf
