@@ -5,10 +5,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: OpenOrbis/toolchain-action@main
-        with:
-          version: latest
-          command: make
+
+      - name: Install OpenOrbis toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+          mkdir -p $HOME/ps4toolchain
+          cd $HOME/ps4toolchain
+          TAG=$(curl -sL https://api.github.com/repos/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -sL "https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/$TAG/$TAG.tar.gz" -o tc.tar.gz
+          tar xzf tc.tar.gz
+          echo "OO_PS4_TOOLCHAIN=$HOME/ps4toolchain" >> $GITHUB_ENV
+
+      - name: Build
+        run: make
+
       - uses: actions/upload-artifact@v4
         with:
           name: rapid-prx
