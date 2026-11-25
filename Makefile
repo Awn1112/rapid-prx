@@ -6,7 +6,7 @@ CREATE_FSELF := $(firstword $(wildcard $(TOOLCHAIN)/bin/create-fself) $(wildcard
 
 LIBS    := -lc -lkernel -lSceVideoOut -lScePad
 CFLAGS  := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include
-LDFLAGS := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crtlib.o
+LDFLAGS := -m elf_x86_64 -pie --allow-multiple-definition --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crtlib.o
 
 CC := clang
 LD := ld.lld
