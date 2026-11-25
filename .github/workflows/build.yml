@@ -1,5 +1,6 @@
 name: build
 on: [push, workflow_dispatch]
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -10,19 +11,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld unzip
-          mkdir -p $HOME/ps4toolchain tc
+          sudo apt-get install -y clang lld unzip jq
+          ROOT=$HOME/ps4toolchain
+          mkdir -p "$ROOT" tc
           cd tc
-          curl -sL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/latest | jq -r '.assets[].browser_download_url' > urls.txt
-          cat urls.txt
-          while read u; do curl -sLO "$u"; done < urls.txt
-          ls -la
-          for f in *.tar.gz; do [ -e "$f" ] && tar xzf "$f" -C $HOME/ps4toolchain; done
-          for f in *.zip; do [ -e "$f" ] && unzip -q "$f" -d $HOME/ps4toolchain; done
-          LINUXBIN=$(find $HOME/ps4toolchain -type d -path '*bin/linux' | head -1)
-          TC=$(dirname $(dirname "$LINUXBIN"))
+          curl -sL -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/latest \
+            | jq -r '.assets[].browser_download_url' > urls.txt
+          while read -r u; do curl -sLO -H "Authorization: Bearer $GH_TOKEN" "$u"; done < urls.txt
+          for f in *.tar.gz; do if [ -e "$f" ]; then tar xzf "$f" -C "$ROOT"; fi; done
+          for f in *.zip;    do if [ -e "$f" ]; then unzip -q "$f" -d "$ROOT"; fi; done
+          LINUXBIN=$(find "$ROOT" -type d -path '*bin/linux' | head -1)
+          if [ -z "$LINUXBIN" ]; then echo "no linux bin dir"; find "$ROOT" -maxdepth 4 -type d; exit 1; fi
+          TC=$(dirname "$(dirname "$LINUXBIN")")
           chmod +x "$LINUXBIN"/*
+          cp -f "$LINUXBIN"/* "$TC/bin/"
+          test -x "$TC/bin/create-fself" || { echo "create-fself missing after install"; exit 1; }
           echo "OO_PS4_TOOLCHAIN=$TC" >> $GITHUB_ENV
 
       - name: Build
