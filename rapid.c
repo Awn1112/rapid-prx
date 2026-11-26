@@ -243,12 +243,14 @@ static int h_padstate(int h, OrbisPadData *d)
     return r;
 }
 
+/* ------------------------ executable stubs --------------------- */
+static uint8_t g_stub_pool[2048] __attribute__((section(".text"), aligned(16)));
+static int g_stub_used;
+
 static void *stub(void *fn)
 {
-    static uint8_t pool[1024];
-    static int u;
-    uint8_t *p = pool + u;
-    u += 16;
+    uint8_t *p = g_stub_pool + g_stub_used;
+    g_stub_used += 16;
     p[0] = 0x48; p[1] = 0xB8;
     *(void**)(p + 2) = fn;
     p[10] = 0xFF; p[11] = 0xE0;
@@ -292,15 +294,21 @@ int module_start(size_t argc, const void *argv)
     LOG("rapid.prx start");
     cfg_load();
 
+    sceKernelMprotect((void*)((uintptr_t)g_stub_pool & ~0xFFFULL), 0x2000, 7);
+
     g_pad = scePadGetHandle(0x1000000, 0, 0);
     LOG("pad handle %d", g_pad);
 
-    patch((void**)&o_reg,      (void*)sceVideoOutRegisterBuffers, (void*)h_reg);
-    patch((void**)&o_flip,     (void*)sceVideoOutSubmitFlip,      (void*)h_flip);
     patch((void**)&o_pad,      (void*)scePadRead,                 (void*)h_pad);
+    LOG("hooked padread");
     patch((void**)&o_padstate, (void*)scePadReadState,            (void*)h_padstate);
+    LOG("hooked padreadstate");
+    patch((void**)&o_reg,      (void*)sceVideoOutRegisterBuffers, (void*)h_reg);
+    LOG("hooked registerbuffers");
+    patch((void**)&o_flip,     (void*)sceVideoOutSubmitFlip,      (void*)h_flip);
+    LOG("hooked submitflip");
 
-    LOG("hooks installed");
+    LOG("all hooks installed");
     return 0;
 }
 
